@@ -76,6 +76,7 @@ graph TB
     end
 
     subgraph "Memory Service"
+        MS["Memory Service"]
         Extractor[Qwen Extractor<br/>Facts • Entities • Relations]
         
         subgraph "Storage Layer"
@@ -115,16 +116,16 @@ graph TB
     
     Pool --> Ollama
     
-    Orchestrator --> Memory Service
+    Orchestrator --> MS
     
-    Memory Service --> Extractor
+    MS --> Extractor
     Extractor --> Pool
     
-    Memory Service --> Embedding
-    Memory Service --> Redis
-    Memory Service --> Dgraph
-    Memory Service --> BadgerDB
-    Memory Service --> Compactor
+    MS --> Embedding
+    MS --> Redis
+    MS --> Dgraph
+    MS --> BadgerDB
+    MS --> Compactor
     
     CodeAgent -.-> GitHub
     DataAgent -.-> Salesforce
