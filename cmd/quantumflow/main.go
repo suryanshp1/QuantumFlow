@@ -321,6 +321,37 @@ fmt.Println("\nTip: Use /plan to generate a new plan first\n")
 return
 }
 
+// Check if plan was already completed or failed
+if plan.State.Status == agent.ExecutionStatusCompleted || plan.State.Status == agent.ExecutionStatusFailed {
+fmt.Printf("\n⚠️  This plan has already finished with status: %s\n", plan.State.Status)
+fmt.Print("Restart execution from beginning? [y/N]: ")
+reader := bufio.NewReader(os.Stdin)
+response, _ := reader.ReadString('\n')
+response = strings.TrimSpace(strings.ToLower(response))
+
+if response == "y" || response == "yes" {
+// Reset state
+plan.State.Status = agent.ExecutionStatusPending
+plan.State.CurrentPhase = 0
+plan.State.CompletedPhases = []int{}
+plan.State.FailedPhases = []int{}
+plan.State.StartedAt = nil
+plan.State.CompletedAt = nil
+// Reset tasks
+for i := range plan.Phases {
+plan.Phases[i].Status = agent.PhaseStatusPending
+for j := range plan.Phases[i].Tasks {
+plan.Phases[i].Tasks[j].Completed = false
+plan.Phases[i].Tasks[j].Result = ""
+}
+}
+fmt.Println("🔄 Plan state reset.")
+} else {
+fmt.Println("❌ Validation cancelled.")
+return
+}
+}
+
 // Request approval
 approved, err := approval.RequestApproval(context.Background(), plan)
 if err != nil {
