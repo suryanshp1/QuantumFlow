@@ -34,7 +34,7 @@ func NewAgentOrchestrator(
 
 	orchestrator := &AgentOrchestrator{
 		agents:     make(map[models.AgentType]Agent),
-		classifier: NewRuleBasedClassifier(),
+		classifier: NewQuantumRouter(inferenceClient),
 		resolver:   NewSimpleConflictResolver(),
 		propagator: NewQwenSummaryPropagator(inferenceClient),
 		memory:     memoryService,

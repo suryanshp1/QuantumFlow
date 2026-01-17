@@ -25,7 +25,7 @@ if config == nil {
 config = &AgentConfig{
 Name:           "CodeAgent",
 Type:           models.AgentTypeCode,
-ModelName:      "qwen2.5:3b",
+ModelName:      "qwen2.5-coder:7b",
 ContextSize:    32768,
 Temperature:    0.3,
 MaxConcurrency: 4,

@@ -1,136 +1,160 @@
 package agent
 
 import (
-	"context"
-	"fmt"
-	"strings"
+"context"
+"encoding/json"
+"fmt"
+"strings"
 
-	"github.com/quantumflow/quantumflow/internal/models"
+"github.com/quantumflow/quantumflow/internal/inference"
+"github.com/quantumflow/quantumflow/internal/models"
 )
 
-// RuleBasedClassifier implements query classification using keyword matching
-type RuleBasedClassifier struct {
-	rules map[models.AgentType][]string
+// QuantumRouter uses LLM-based reasoning to route queries to appropriate agents
+type QuantumRouter struct {
+client *inference.Client
 }
 
-// NewRuleBasedClassifier creates a new rule-based classifier
-func NewRuleBasedClassifier() *RuleBasedClassifier {
-	return &RuleBasedClassifier{
-		rules: map[models.AgentType][]string{
-			models.AgentTypeCode: {
-				"code", "function", "class", "debug", "refactor", "bug",
-				"implement", "parse", "ast", "syntax", "compile", "test",
-				"method", "variable", "import", "package", "module",
-				"golang", "python", "javascript", "typescript", "java",
-				"error", "exception", "stacktrace", "lint",
-			},
-			models.AgentTypeData: {
-				"data", "database", "sql", "query", "table", "schema",
-				"analytics", "pandas", "dataframe", "csv", "json",
-				"aggregate", "group", "join", "select", "insert",
-				"update", "delete", "migration", "index", "postgres",
-				"mysql", "mongodb", "redis", "statistics", "chart",
-			},
-			models.AgentTypeInfra: {
-				"deploy", "infrastructure", "server", "container", "docker",
-				"kubernetes", "k8s", "terraform", "ansible", "aws",
-				"gcp", "azure", "cloud", "scaling", "load balancer",
-				"nginx", "service", "pod", "node", "cluster", "helm",
-				"vpc", "network", "firewall", "instance", "vm",
-			},
-			models.AgentTypeSec: {
-				"security", "vulnerability", "cve", "owasp", "xss",
-				"sql injection", "csrf", "authentication", "authorization",
-				"encryption", "decrypt", "certificate", "ssl", "tls",
-				"firewall", "audit", "compliance", "pen test", "scan",
-				"malware", "threat", "attack", "breach", "exploit",
-			},
-		},
-	}
+// NewQuantumRouter creates a new LLM-based router
+func NewQuantumRouter(client *inference.Client) *QuantumRouter {
+return &QuantumRouter{
+client: client,
+}
 }
 
-// Classify returns the best agent type for a query
-func (c *RuleBasedClassifier) Classify(ctx context.Context, query string) (models.AgentType, float64, error) {
-	classifications, err := c.ClassifyMulti(ctx, query, 1)
-	if err != nil {
-		return "", 0, err
-	}
-
-	if len(classifications) == 0 {
-		// Default to code agent if no match
-		return models.AgentTypeCode, 0.3, nil
-	}
-
-	return classifications[0].AgentType, classifications[0].Confidence, nil
+// RoutingDecision represents the LLM's routing decision
+type RoutingDecision struct {
+PrimaryAgent   string  `json:"primary_agent"`
+Confidence     float64 `json:"confidence"`
+Reasoning      string  `json:"reasoning"`
+SecondaryAgent string  `json:"secondary_agent,omitempty"`
+ToolsNeeded    []string `json:"tools_needed,omitempty"`
 }
 
-// ClassifyMulti returns top-k agent types with confidence scores
-func (c *RuleBasedClassifier) ClassifyMulti(ctx context.Context, query string, k int) ([]Classification, error) {
-	query = strings.ToLower(query)
-	words := strings.Fields(query)
+// Classify uses LLM to intelligently route queries
+func (r *QuantumRouter) Classify(ctx context.Context, query string) (models.AgentType, float64, error) {
+prompt := r.buildRoutingPrompt(query)
 
-	// Calculate scores for each agent type
-	scores := make(map[models.AgentType]float64)
-	matches := make(map[models.AgentType][]string)
-
-	for agentType, keywords := range c.rules {
-		matchCount := 0
-		matchedKeywords := []string{}
-
-		for _, keyword := range keywords {
-			for _, word := range words {
-				if strings.Contains(word, keyword) || strings.Contains(keyword, word) {
-					matchCount++
-					matchedKeywords = append(matchedKeywords, keyword)
-					break
-				}
-			}
-		}
-
-		if matchCount > 0 {
-			// Score = matches / total words, with bonus for multiple matches
-			score := float64(matchCount) / float64(len(words))
-			score = score + (float64(matchCount) * 0.1) // Bonus for multiple matches
-			if score > 1.0 {
-				score = 1.0
-			}
-
-			scores[agentType] = score
-			matches[agentType] = matchedKeywords
-		}
-	}
-
-	// Convert to classifications and sort by score
-	var classifications []Classification
-	for agentType, score := range scores {
-		classifications = append(classifications, Classification{
-			AgentType:  agentType,
-			Confidence: score,
-			Reasoning:  fmt.Sprintf("Matched keywords: %s", strings.Join(matches[agentType], ", ")),
-		})
-	}
-
-	// Sort by confidence (descending)
-	for i := 0; i < len(classifications); i++ {
-		for j := i + 1; j < len(classifications); j++ {
-			if classifications[j].Confidence > classifications[i].Confidence {
-				classifications[i], classifications[j] = classifications[j], classifications[i]
-			}
-		}
-	}
-
-	// Return top-k
-	if len(classifications) > k {
-		classifications = classifications[:k]
-	}
-
-	return classifications, nil
+result, err := r.client.GenerateSync(ctx, prompt)
+if err != nil {
+return "", 0, fmt.Errorf("routing failed: %w", err)
 }
 
-// AddRule adds a new keyword rule for an agent type
-func (c *RuleBasedClassifier) AddRule(agentType models.AgentType, keywords []string) {
-	if c.rules[agentType] == nil {
-		c.rules[agentType] = []string{}
-	}
-	c.rules[agentType] = append(c.rules[agentType], keywords...)
+var decision RoutingDecision
+if err := r.parseRoutingResponse(result.Response, &decision); err != nil {
+return "", 0, fmt.Errorf("failed to parse routing decision: %w", err)
+}
+
+// Normalize agent type from LLM response (includes fallback)
+agentType := normalizeAgentType(decision.PrimaryAgent)
+
+return agentType, decision.Confidence, nil
+}
+
+// ClassifyMulti returns top-k agent classifications
+func (r *QuantumRouter) ClassifyMulti(ctx context.Context, query string, k int) ([]Classification, error) {
+agentType, confidence, err := r.Classify(ctx, query)
+if err != nil {
+return nil, err
+}
+
+return []Classification{
+{
+AgentType:  agentType,
+Confidence: confidence,
+Reasoning:  fmt.Sprintf("Selected %s via LLM routing", agentType),
+},
+}, nil
+}
+
+// buildRoutingPrompt creates the prompt for LLM-based routing
+func (r *QuantumRouter) buildRoutingPrompt(query string) string {
+return fmt.Sprintf(`You are an intelligent routing system for a multi-agent AI coding assistant.
+
+Available agents:
+- code: Code generation, debugging, refactoring, AST parsing, linting, programming questions
+- data: SQL queries, database schema, data analysis, migrations, analytics
+- infra: Docker, Kubernetes, Terraform, deployment, DevOps, cloud infrastructure
+- sec: Security audits, vulnerabilities, OWASP, authentication, encryption
+
+User Query: %s
+
+IMPORTANT RULES:
+- If the query is a GENERAL question, greeting, or help request → use "code" agent
+- If the query asks "what can you do?" or "introduce yourself" → use "code" agent
+- For conversational/unclear queries → use "code" agent with low confidence
+- NEVER return "none", "general", or any value other than: code, data, infra, sec
+- You MUST choose one of the four agents above
+
+Respond with ONLY a JSON object:
+{
+  "primary_agent": "code|data|infra|sec",
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}
+
+JSON Response:`, query)
+}
+
+// parseRoutingResponse extracts the routing decision from LLM output
+func (r *QuantumRouter) parseRoutingResponse(response string, decision *RoutingDecision) error {
+response = strings.TrimSpace(response)
+
+// Remove markdown code blocks
+if strings.HasPrefix(response, "```json") {
+response = strings.TrimPrefix(response, "```json")
+response = strings.TrimSuffix(response, "```")
+response = strings.TrimSpace(response)
+} else if strings.HasPrefix(response, "```") {
+response = strings.TrimPrefix(response, "```")
+response = strings.TrimSuffix(response, "```")
+response = strings.TrimSpace(response)
+}
+
+// Find JSON object
+start := strings.Index(response, "{")
+end := strings.LastIndex(response, "}")
+
+if start == -1 || end == -1 {
+return fmt.Errorf("no JSON object found in response")
+}
+
+jsonStr := response[start : end+1]
+
+if err := json.Unmarshal([]byte(jsonStr), decision); err != nil {
+return fmt.Errorf("JSON parse error: %w", err)
+}
+
+// Clamp confidence
+if decision.Confidence < 0 {
+decision.Confidence = 0
+}
+if decision.Confidence > 1 {
+decision.Confidence = 1
+}
+
+return nil
+}
+
+// normalizeAgentType converts LLM output to proper agent type constant
+// Includes fallback to CodeAgent for safety
+func normalizeAgentType(agentStr string) models.AgentType {
+normalized := strings.ToLower(strings.TrimSpace(agentStr))
+
+switch normalized {
+case "code", "codeagent":
+return models.AgentTypeCode
+case "data", "dataagent":
+return models.AgentTypeData
+case "infra", "infraagent":
+return models.AgentTypeInfra
+case "sec", "secagent", "security":
+return models.AgentTypeSec
+default:
+// Fallback to CodeAgent for:
+// - Invalid types ("none", "general", etc.)
+// - Conversational queries
+// - Unknown/malformed responses
+return models.AgentTypeCode
+}
 }

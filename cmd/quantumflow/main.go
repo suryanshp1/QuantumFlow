@@ -61,8 +61,12 @@ orchestrator.RegisterAgent(agent.NewCodeAgent(client, nil))
 orchestrator.RegisterAgent(agent.NewDataAgent(client, nil))
 orchestrator.RegisterAgent(agent.NewInfraAgent(client, nil))
 orchestrator.RegisterAgent(agent.NewSecAgent(client, nil))
+// Initialize planner for Plan Mode
+planner := agent.NewPlanner(client)
+executor := agent.NewExecutor(orchestrator)
+approval := agent.NewApprovalWorkflow(planner)
 
-fmt.Println("🤖 Multi-Agent System Active:")
+fmt.Println("🤖 Multi-Agent System Active (Quantum Router):")
 fmt.Println("   • CodeAgent  - Code analysis")
 fmt.Println("   • DataAgent  - SQL & analytics")
 fmt.Println("   • InfraAgent - DevOps")
@@ -83,7 +87,7 @@ continue
 }
 
 if strings.HasPrefix(input, "/") {
-handleCommand(input, &history, availableModels)
+handleCommand(input, &history, availableModels, client, planner, executor, approval)
 continue
 }
 
@@ -95,30 +99,41 @@ Timestamp: time.Now(),
 
 fmt.Println()
 
-// STEP 1: Fast routing to determine agent
-fmt.Print("🔍 Analyzing query... ")
+// Quantum Router: LLM-based intelligent routing
+fmt.Print("🧠 Quantum Router analyzing... ")
 startRoute := time.Now()
 
-// Route only (fast)
-agents, err := orchestrator.Route(ctx, input, buildContext())
-if err != nil || len(agents) == 0 {
-fmt.Printf("\n❌ Error: routing failed\n\n")
+// Get routing decision from Quantum Router
+router := agent.NewQuantumRouter(client)
+agentType, confidence, err := router.Classify(ctx, input)
+if err != nil {
+fmt.Printf("\n❌ Routing error: %v\n\n", err)
 continue
 }
 
-selectedAgent := agents[0]
 routeDuration := time.Since(startRoute)
 
-// Show routing result
-fmt.Printf("✓ %s (%.0fms)\n", selectedAgent.Name(), routeDuration.Seconds()*1000)
-
-// Get confidence from classifier
-classifier := agent.NewRuleBasedClassifier()
-_, confidence, _ := classifier.Classify(ctx, input)
+// Show routing decision
+fmt.Printf("✓ %s selected (%.0fms)\n", agentType, routeDuration.Seconds()*1000)
 fmt.Printf("📊 Confidence: %.0f%% | Generating...\n", confidence*100)
 fmt.Println()
 
-// STEP 2: Execute with streaming
+// Get the selected agent from orchestrator
+agents := orchestrator.GetAgents()
+var selectedAgent agent.Agent
+for _, a := range agents {
+if a.Type() == agentType {
+selectedAgent = a
+break
+}
+}
+
+if selectedAgent == nil {
+fmt.Printf("❌ Agent %s not found\n\n", agentType)
+continue
+}
+
+// Execute with streaming
 fmt.Print("QuantumFlow: ")
 
 startGen := time.Now()
@@ -165,7 +180,7 @@ MaxExecutionTime: 5 * time.Minute,
 }
 }
 
-func handleCommand(cmd string, history *[]models.Message, modelsList []string) {
+func handleCommand(cmd string, history *[]models.Message, modelsList []string, client *inference.Client, planner *agent.Planner, executor *agent.Executor, approval *agent.ApprovalWorkflow) {
 parts := strings.Fields(cmd)
 if len(parts) == 0 {
 return
@@ -174,7 +189,11 @@ return
 switch parts[0] {
 case "/help":
 fmt.Println("\nCommands: /help /models /history /stats /clear /exit")
-fmt.Println("Agent Routing: CodeAgent|DataAgent|InfraAgent|SecAgent\n")
+fmt.Println("Agent Routing: Quantum Router (LLM-based)\n")
+case "/plan":
+handlePlanCommand(cmd, client, planner)
+case "/execute":
+handleExecuteCommand(cmd, client, planner, executor, approval)
 case "/clear", "/new":
 *history = []models.Message{}
 fmt.Println("✓ Conversation cleared\n")
@@ -206,6 +225,7 @@ func printBanner() {
 fmt.Printf(`
 ╔═════════════════════════════════════════════════════════╗
 ║        QuantumFlow Terminal AI Assistant %s             ║
+║            Powered by Quantum Router (LLM)              ║
 ╚═════════════════════════════════════════════════════════╝
 
 `, version)
@@ -216,4 +236,122 @@ if len(s) <= maxLen {
 return s
 }
 return s[:maxLen-3] + "..."
+}
+
+func handlePlanCommand(cmd string, client *inference.Client, planner *agent.Planner) {
+parts := strings.SplitN(cmd, " ", 2)
+if len(parts) < 2 {
+fmt.Println("\nUsage: /plan <task description>")
+fmt.Println("Example: /plan Add user authentication with JWT\n")
+return
+}
+
+query := strings.TrimSpace(parts[1])
+
+fmt.Println("\n🧠 Analyzing task complexity...")
+fmt.Println("📋 Generating execution plan...\n")
+
+ctx := context.Background()
+req := &agent.PlanGenerationRequest{
+Query:       query,
+Context:     buildContext(),
+Preferences: agent.DefaultPlanPreferences(),
+}
+
+plan, err := planner.Generate(ctx, req)
+if err != nil {
+fmt.Printf("❌ Failed to generate plan: %v\n\n", err)
+return
+}
+
+// Create plans directory
+homeDir, _ := os.UserHomeDir()
+plansDir := fmt.Sprintf("%s/.quantumflow/plans", homeDir)
+os.MkdirAll(plansDir, 0755)
+
+// Save plan
+planFile := fmt.Sprintf("%s/%s.md", plansDir, plan.ID)
+markdown := planner.FormatAsMarkdown(plan)
+os.WriteFile(planFile, []byte(markdown), 0644)
+
+// Display summary
+fmt.Println("═══════════════════════════════════════════════════════════")
+fmt.Printf("📋 %s\n", plan.Title)
+fmt.Println("═══════════════════════════════════════════════════════════")
+fmt.Printf("%s\n\n", plan.Description)
+
+fmt.Printf("**Phases:** %d\n", len(plan.Phases))
+for i, phase := range plan.Phases {
+fmt.Printf("\n## Phase %d: %s\n", i+1, phase.Name)
+fmt.Printf("   Agent: %s | Time: %s\n", phase.Agent, phase.EstimatedTime)
+fmt.Printf("   Tasks: %d\n", len(phase.Tasks))
+}
+
+fmt.Println("\n═══════════════════════════════════════════════════════════")
+fmt.Printf("\n✓ Plan saved to: %s\n", planFile)
+
+// Save plan state for execution
+approval := agent.NewApprovalWorkflow(planner)
+if err := approval.SavePlanState(plan); err != nil {
+fmt.Printf("⚠️  Could not save plan state: %v\n", err)
+}
+
+fmt.Printf("\n📋 Plan ID: %s\n", plan.ID)
+fmt.Printf("▶️  Execute with: /execute %s\n", plan.ID)
+fmt.Println()
+}
+
+func handleExecuteCommand(cmd string, client *inference.Client, planner *agent.Planner, executor *agent.Executor, approval *agent.ApprovalWorkflow) {
+parts := strings.Fields(cmd)
+if len(parts) < 2 {
+fmt.Println("\nUsage: /execute <plan-id>")
+fmt.Println("Example: /execute plan_20260117_140530\n")
+return
+}
+
+planID := parts[1]
+
+// Load plan from saved state or file
+fmt.Printf("\n📂 Loading plan: %s...\n", planID)
+
+plan, err := approval.LoadPlanState(planID)
+if err != nil {
+fmt.Printf("❌ Could not load plan: %v\n", err)
+fmt.Println("\nTip: Use /plan to generate a new plan first\n")
+return
+}
+
+// Request approval
+approved, err := approval.RequestApproval(context.Background(), plan)
+if err != nil {
+fmt.Printf("❌ Approval error: %v\n\n", err)
+return
+}
+
+if !approved {
+fmt.Println("\n❌ Execution cancelled\n")
+return
+}
+
+// Save approved state
+if err := approval.SavePlanState(plan); err != nil {
+fmt.Printf("⚠️  Could not save plan state: %v\n", err)
+}
+
+// Execute plan
+ctx := context.Background()
+if err := executor.Execute(ctx, plan); err != nil {
+fmt.Printf("\n❌ Execution failed: %v\n\n", err)
+
+// Save failed state
+approval.SavePlanState(plan)
+return
+}
+
+// Save completed state
+if err := approval.SavePlanState(plan); err != nil {
+fmt.Printf("⚠️  Could not save final state: %v\n", err)
+}
+
+fmt.Println("✅ Plan execution completed successfully!\n")
 }

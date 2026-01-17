@@ -23,7 +23,7 @@ if config == nil {
 config = &AgentConfig{
 Name:           "DataAgent",
 Type:           models.AgentTypeData,
-ModelName:      "qwen2.5:3b",
+ModelName:      "qwen2.5-coder:7b",
 ContextSize:    32768,
 Temperature:    0.4,
 MaxConcurrency: 4,

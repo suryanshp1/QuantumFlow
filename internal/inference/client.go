@@ -16,7 +16,7 @@ import (
 // Config holds the inference client configuration
 type Config struct {
 	OllamaURL   string  // Default: http://localhost:11434
-	Model       string  // Default: qwen3-coder:30b
+	Model       string  // Default: qwen2.5-coder:7b
 	ContextSize int     // Default: 32768
 	Temperature float64 // Default: 0.7
 	Timeout     time.Duration
@@ -26,7 +26,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		OllamaURL:   "http://localhost:11434",
-		Model:       "qwen2.5:3b",  // Using 3B model - qwen3-coder:30b has issues
+		Model:       "qwen2.5-coder:7b",  // Using 3B model - qwen2.5-coder:7b has issues
 		ContextSize: 32768,
 		Temperature: 0.7,
 		Timeout:     5 * time.Minute,
