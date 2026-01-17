@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # Redis for vector memory storage
+  redis:
+    image: redis/redis-stack:latest
+    container_name: quantumflow-redis
+    ports:
+      - "6379:6379"
+      - "8001:8001" # RedisInsight
+    environment:
+      - REDIS_ARGS=--requirepass quantumflow123
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "quantumflow123", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Dgraph for semantic graph storage
+  dgraph-zero:
+    image: dgraph/dgraph:latest
+    container_name: quantumflow-dgraph-zero
+    ports:
+      - "5080:5080"
+      - "6080:6080"
+    command: dgraph zero --my=dgraph-zero:5080
+    volumes:
+      - dgraph-zero-data:/dgraph
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:6080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  dgraph-alpha:
+    image: dgraph/dgraph:latest
+    container_name: quantumflow-dgraph-alpha
+    ports:
+      - "8080:8080"
+      - "9080:9080"
+    command: dgraph alpha --my=dgraph-alpha:7080 --zero=dgraph-zero:5080 --security whitelist=0.0.0.0/0
+    volumes:
+      - dgraph-alpha-data:/dgraph
+    depends_on:
+      - dgraph-zero
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+
+  # TimescaleDB for time-series pattern storage (predictive engine)
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: quantumflow-timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=quantumflow
+      - POSTGRES_USER=quantumflow
+      - POSTGRES_PASSWORD=quantumflow123
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quantumflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+    driver: local
+  dgraph-zero-data:
+    driver: local
+  dgraph-alpha-data:
+    driver: local
+  timescaledb-data:
+    driver: local
+
+networks:
+  default:
+    name: quantumflow-network

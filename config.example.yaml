@@ -1,0 +1,103 @@
+# QuantumFlow Configuration
+
+# Model Configuration
+model:
+  # Ollama endpoint URL
+  ollama_url: "http://localhost:11434"
+  
+  # Model name (qwen2:7b, qwen2:14b, qwen3-coder:30b, qwen2:72b)
+  name: "qwen3-coder:30b"
+  
+  # Maximum context size (tokens)
+  context_size: 32768
+  
+  # Temperature for generation (0.0-1.0)
+  # Lower values = more deterministic, higher = more creative
+  temperature: 0.7
+  
+  # Request timeout
+  timeout: "5m"
+
+# Memory Service Configuration
+memory:
+  # Redis configuration (vector storage)
+  redis:
+    url: "localhost:6379"
+    password: "quantumflow123"
+    db: 0
+  
+  # Dgraph configuration (semantic graph)
+  dgraph:
+    url: "localhost:8080"
+    alpha_url: "localhost:9080"
+  
+  # BadgerDB configuration (procedural patterns)
+  badger:
+    path: "~/.quantumflow/badger"
+  
+  # Memory compaction settings
+  compaction:
+    enabled: true
+    interval: "1h"
+    retention_days: 90
+
+# Inference Pool Configuration
+pool:
+  # Number of worker goroutines
+  workers: 100
+  
+  # Request queue size
+  queue_size: 10000
+  
+  # Maximum concurrent inference requests
+  max_concurrent: 8
+
+# Integration Configuration
+integrations:
+  # GitHub
+  github:
+    enabled: false
+    oauth_enabled: false
+  
+  # Slack
+  slack:
+    enabled: false
+    oauth_enabled: false
+  
+  # Salesforce
+  salesforce:
+    enabled: false
+    oauth_enabled: false
+  
+  # Zendesk
+  zendesk:
+    enabled: false
+    oauth_enabled: false
+
+# Logging Configuration
+logging:
+  # Log level (debug, info, warn, error)
+  level: "info"
+  
+  # Log format (json, text)
+  format: "text"
+  
+  # Log output (stdout, file)
+  output: "stdout"
+  
+  # Log file path (if output=file)
+  file_path: "~/.quantumflow/logs/quantumflow.log"
+
+# CLI Configuration
+cli:
+  # Enable colored output
+  colors: true
+  
+  # History file path
+  history_file: "~/.quantumflow/history"
+  
+  # Auto-save conversations
+  auto_save: true
+  
+  # Conversation save path
+  save_path: "~/.quantumflow/conversations"
