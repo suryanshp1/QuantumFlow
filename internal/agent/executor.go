@@ -153,6 +153,7 @@ func (e *Executor) buildPhaseQuery(phase *Phase) string {
 }
 
 // areDependenciesMet checks if all dependencies for a phase are satisfied
+// areDependenciesMet checks if all dependencies for a phase are satisfied
 func (e *Executor) areDependenciesMet(plan *ExecutionPlan, phase *Phase) bool {
 	if len(phase.Dependencies) == 0 {
 		return true
@@ -161,7 +162,9 @@ func (e *Executor) areDependenciesMet(plan *ExecutionPlan, phase *Phase) bool {
 	for _, depID := range phase.Dependencies {
 		depCompleted := false
 		for _, completedIdx := range plan.State.CompletedPhases {
-			if plan.Phases[completedIdx].ID == depID {
+			completedPhase := plan.Phases[completedIdx]
+			// Check if completed phase matches dependency by ID OR Name
+			if completedPhase.ID == depID || completedPhase.Name == depID {
 				depCompleted = true
 				break
 			}
