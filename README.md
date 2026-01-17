@@ -23,11 +23,17 @@ QuantumFlow is a next-generation terminal AI assistant that combines local AI in
 - Automatic memory extraction and compaction
 
 ### 🤖 **Multi-Agent Intelligence**
+- **Plan Mode 2.0**: Autonomous multi-step execution with file/command capabilities
 - **CodeAgent**: AST parsing, code search, linting
 - **DataAgent**: SQL generation, data analysis
 - **InfraAgent**: Docker, Kubernetes, Terraform operations  
 - **SecAgent**: OWASP scanning, vulnerability detection
 - Intelligent query routing and conflict resolution
+
+### 🛠️ **Autonomous Capabilities**
+- **File System**: Create, read, and modify files automatically
+- **Command Runner**: Execute shell commands, install dependencies, run tests
+- **Self-Healing**: Automatic rollback on failure (with checkpoints)
 
 ### � **Business Integrations**
 - **GitHub**: Repository management, PRs, commits, code search
@@ -227,6 +233,8 @@ QuantumFlow: I can assist with:
 ### Available Commands
 
 ```
+/plan <task> Generate an execution plan for a complex task
+/execute <id> Execute a plan autonomously
 /help       Show help message
 /models     List available Ollama models
 /history    Show conversation history  
@@ -376,6 +384,7 @@ See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for:
 ## 📚 Documentation
 
 - [Quick Start Guide](docs/QUICKSTART.md) - Get running in 5 minutes
+- [Plan Mode Guide](docs/PLAN_MODE.md) - Autonomous execution guide
 - [Contributing Guide](docs/CONTRIBUTING.md) - Development workflow
 - [Walkthrough](/.gemini/antigravity/brain/4a473b18-8e92-4c17-b207-05207c9768a0/walkthrough.md) - Implementation details
 
