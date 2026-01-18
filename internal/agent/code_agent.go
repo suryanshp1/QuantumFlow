@@ -57,16 +57,18 @@ prompt := a.buildPrompt(request)
 var fullResponse string
 
 if request.StreamCallback != nil {
-// Streaming mode
+// Streaming mode with efficient string building
+var responseBuilder strings.Builder
 tokenChan, err := a.client.Generate(ctx, prompt, true)
 if err != nil {
 return nil, fmt.Errorf("generation failed: %w", err)
 }
 
 for token := range tokenChan {
-fullResponse += token
+responseBuilder.WriteString(token)
 request.StreamCallback(token)
 }
+fullResponse = responseBuilder.String()
 } else {
 // Synchronous mode
 result, err := a.client.GenerateSync(ctx, prompt)

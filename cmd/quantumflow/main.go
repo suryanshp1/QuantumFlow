@@ -99,44 +99,11 @@ Timestamp: time.Now(),
 
 fmt.Println()
 
-// Quantum Router: LLM-based intelligent routing
-fmt.Print("🧠 Quantum Router analyzing... ")
-startRoute := time.Now()
-
-// Get routing decision from Quantum Router
-router := agent.NewQuantumRouter(client)
-agentType, confidence, err := router.Classify(ctx, input)
-if err != nil {
-fmt.Printf("\n❌ Routing error: %v\n\n", err)
-continue
-}
-
-routeDuration := time.Since(startRoute)
-
-// Show routing decision
-fmt.Printf("✓ %s selected (%.0fms)\n", agentType, routeDuration.Seconds()*1000)
-fmt.Printf("📊 Confidence: %.0f%% | Generating...\n", confidence*100)
-fmt.Println()
-
-// Get the selected agent from orchestrator
-agents := orchestrator.GetAgents()
-var selectedAgent agent.Agent
-for _, a := range agents {
-if a.Type() == agentType {
-selectedAgent = a
-break
-}
-}
-
-if selectedAgent == nil {
-fmt.Printf("❌ Agent %s not found\n\n", agentType)
-continue
-}
-
-// Execute with streaming
-fmt.Print("QuantumFlow: ")
-
+// Execute through orchestrator - it handles routing internally
+// This eliminates the double LLM call (was: router.Classify + agent.Execute)
+fmt.Print("🧠 Processing... ")
 startGen := time.Now()
+
 request := &agent.Request{
 ID:      fmt.Sprintf("req-%d", time.Now().Unix()),
 Query:   input,
@@ -147,7 +114,8 @@ fmt.Print(token)
 },
 }
 
-response, err := selectedAgent.Execute(ctx, request)
+// Single call through orchestrator (includes routing + execution)
+response, err := orchestrator.Execute(ctx, request)
 if err != nil {
 fmt.Printf("\n❌ Error: %v\n\n", err)
 continue

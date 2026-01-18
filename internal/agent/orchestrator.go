@@ -177,11 +177,44 @@ func (o *AgentOrchestrator) executeSequential(ctx context.Context, agents []Agen
 	return responses, nil
 }
 
-// executeParallel runs agents concurrently (placeholder for future)
+// executeParallel runs agents concurrently using goroutines
 func (o *AgentOrchestrator) executeParallel(ctx context.Context, agents []Agent, request *Request) ([]*Response, error) {
-	// TODO: Implement parallel execution with goroutines
-	// For now, fall back to sequential
-	return o.executeSequential(ctx, agents, request)
+	var wg sync.WaitGroup
+	responses := make([]*Response, len(agents))
+	errors := make([]error, len(agents))
+
+	for i, agent := range agents {
+		wg.Add(1)
+		go func(idx int, a Agent) {
+			defer wg.Done()
+			resp, err := a.Execute(ctx, request)
+			responses[idx] = resp
+			errors[idx] = err
+		}(i, agent)
+	}
+
+	wg.Wait()
+
+	// Collect valid responses
+	var validResponses []*Response
+	var firstError error
+	for i, resp := range responses {
+		if errors[i] != nil && firstError == nil {
+			firstError = errors[i]
+		}
+		if resp != nil {
+			validResponses = append(validResponses, resp)
+		}
+	}
+
+	if len(validResponses) == 0 {
+		if firstError != nil {
+			return nil, firstError
+		}
+		return nil, fmt.Errorf("all agents failed")
+	}
+
+	return validResponses, nil
 }
 
 // SimpleConflictResolver provides basic conflict resolution

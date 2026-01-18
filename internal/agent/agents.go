@@ -55,16 +55,18 @@ prompt := a.buildPrompt(request)
 var fullResponse string
 
 if request.StreamCallback != nil {
-// Streaming mode
+// Streaming mode with efficient string building
+var responseBuilder strings.Builder
 tokenChan, err := a.client.Generate(ctx, prompt, true)
 if err != nil {
 return nil, fmt.Errorf("generation failed: %w", err)
 }
 
 for token := range tokenChan {
-fullResponse += token
+responseBuilder.WriteString(token)
 request.StreamCallback(token)
 }
+fullResponse = responseBuilder.String()
 } else {
 // Synchronous mode
 result, err := a.client.GenerateSync(ctx, prompt)
@@ -152,15 +154,17 @@ prompt := fmt.Sprintf("You are an infrastructure expert. Help with deployment an
 var fullResponse string
 
 if request.StreamCallback != nil {
+var responseBuilder strings.Builder
 tokenChan, err := a.client.Generate(ctx, prompt, true)
 if err != nil {
 return nil, err
 }
 
 for token := range tokenChan {
-fullResponse += token
+responseBuilder.WriteString(token)
 request.StreamCallback(token)
 }
+fullResponse = responseBuilder.String()
 } else {
 result, err := a.client.GenerateSync(ctx, prompt)
 if err != nil {
@@ -231,15 +235,17 @@ prompt := fmt.Sprintf("You are a security expert. Analyze and provide security r
 var fullResponse string
 
 if request.StreamCallback != nil {
+var responseBuilder strings.Builder
 tokenChan, err := a.client.Generate(ctx, prompt, true)
 if err != nil {
 return nil, err
 }
 
 for token := range tokenChan {
-fullResponse += token
+responseBuilder.WriteString(token)
 request.StreamCallback(token)
 }
+fullResponse = responseBuilder.String()
 } else {
 result, err := a.client.GenerateSync(ctx, prompt)
 if err != nil {

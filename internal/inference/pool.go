@@ -3,6 +3,7 @@ package inference
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -51,9 +52,9 @@ type PoolConfig struct {
 // DefaultPoolConfig returns default pool configuration
 func DefaultPoolConfig() *PoolConfig {
 	return &PoolConfig{
-		Workers:         100,
-		QueueSize:       10000,
-		MaxConcurrent:   8,
+		Workers:         runtime.NumCPU() * 2, // Scale with hardware
+		QueueSize:       1000,                  // Reasonable queue size
+		MaxConcurrent:   4,                     // Match typical Ollama defaults
 		InferenceConfig: DefaultConfig(),
 	}
 }

@@ -2,6 +2,7 @@ package inference
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -14,8 +15,9 @@ func TestPoolCreation(t *testing.T) {
 		t.Fatal("Expected pool to be created")
 	}
 
-	if pool.workers != 100 {
-		t.Errorf("Expected 100 workers, got %d", pool.workers)
+	expectedWorkers := runtime.NumCPU() * 2
+	if pool.workers != expectedWorkers {
+		t.Errorf("Expected %d workers, got %d", expectedWorkers, pool.workers)
 	}
 
 	// Cleanup

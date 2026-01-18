@@ -1,25 +1,28 @@
 package agent
 
 import (
-"context"
-"encoding/json"
-"fmt"
-"strings"
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
 
-"github.com/quantumflow/quantumflow/internal/inference"
-"github.com/quantumflow/quantumflow/internal/models"
+	"github.com/quantumflow/quantumflow/internal/inference"
+	"github.com/quantumflow/quantumflow/internal/models"
 )
 
 // QuantumRouter uses LLM-based reasoning to route queries to appropriate agents
 type QuantumRouter struct {
-client *inference.Client
+	client *inference.Client
+	cache  *RoutingCache
 }
 
-// NewQuantumRouter creates a new LLM-based router
+// NewQuantumRouter creates a new LLM-based router with caching
 func NewQuantumRouter(client *inference.Client) *QuantumRouter {
-return &QuantumRouter{
-client: client,
-}
+	return &QuantumRouter{
+		client: client,
+		cache:  NewRoutingCache(5 * time.Minute), // 5 minute TTL
+	}
 }
 
 // RoutingDecision represents the LLM's routing decision
@@ -33,12 +36,17 @@ ToolsNeeded    []string `json:"tools_needed,omitempty"`
 
 // Classify uses LLM to intelligently route queries
 func (r *QuantumRouter) Classify(ctx context.Context, query string) (models.AgentType, float64, error) {
-prompt := r.buildRoutingPrompt(query)
+	// Check cache first (avoids LLM call for repeated/similar queries)
+	if cached, ok := r.cache.Get(query); ok {
+		return cached.AgentType, cached.Confidence, nil
+	}
 
-result, err := r.client.GenerateSync(ctx, prompt)
-if err != nil {
-return "", 0, fmt.Errorf("routing failed: %w", err)
-}
+	prompt := r.buildRoutingPrompt(query)
+
+	result, err := r.client.GenerateSync(ctx, prompt)
+	if err != nil {
+		return "", 0, fmt.Errorf("routing failed: %w", err)
+	}
 
 var decision RoutingDecision
 if err := r.parseRoutingResponse(result.Response, &decision); err != nil {
@@ -47,6 +55,9 @@ return "", 0, fmt.Errorf("failed to parse routing decision: %w", err)
 
 // Normalize agent type from LLM response (includes fallback)
 agentType := normalizeAgentType(decision.PrimaryAgent)
+
+// Cache the result for future queries
+r.cache.Set(query, agentType, decision.Confidence)
 
 return agentType, decision.Confidence, nil
 }
