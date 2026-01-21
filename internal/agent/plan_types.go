@@ -8,13 +8,15 @@ import (
 
 // ExecutionPlan represents a multi-phase execution plan
 type ExecutionPlan struct {
-	ID          string          `json:"id"`
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	Phases      []Phase         `json:"phases"`
-	State       ExecutionState  `json:"state"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	ID            string              `json:"id"`
+	Title         string              `json:"title"`
+	Description   string              `json:"description"`
+	FileStructure map[string][]string `json:"file_structure,omitempty"` // Expected: dir -> files
+	Phases        []Phase             `json:"phases"`
+	State         ExecutionState      `json:"state"`
+	Manifest      *ProjectManifest    `json:"-"` // Runtime tracking (not serialized)
+	CreatedAt     time.Time           `json:"created_at"`
+	UpdatedAt     time.Time           `json:"updated_at"`
 }
 
 // Phase represents a single phase in an execution plan

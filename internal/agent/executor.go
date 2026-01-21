@@ -39,8 +39,25 @@ func (e *Executor) Execute(ctx context.Context, plan *ExecutionPlan) error {
 		plan.State.CurrentPhase = 0
 	}
 	
+	// Initialize project manifest for tracking created files
+	if plan.Manifest == nil {
+		plan.Manifest = NewProjectManifest(plan.Title, ".")
+		if plan.FileStructure != nil {
+			plan.Manifest.SetExpectedStructure(plan.FileStructure)
+		}
+	}
+	
+	// Create project directory structure upfront
+	if err := e.initProjectStructure(plan); err != nil {
+		fmt.Printf("⚠️ Warning: Could not create project directories: %v\n", err)
+	}
+	
 	fmt.Printf("\n🚀 Starting execution of: %s\n", plan.Title)
-	fmt.Printf("Total phases: %d\n\n", len(plan.Phases))
+	fmt.Printf("Total phases: %d\n", len(plan.Phases))
+	if len(plan.FileStructure) > 0 {
+		fmt.Printf("📁 Project structure: %d directories\n", len(plan.FileStructure))
+	}
+	fmt.Println()
 	
 	// Execute each phase sequentially
 	for i := plan.State.CurrentPhase; i < len(plan.Phases); i++ {
@@ -95,7 +112,8 @@ func (e *Executor) Execute(ctx context.Context, plan *ExecutionPlan) error {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Printf("🎉 Execution complete! (%s)\n", plan.Title)
 	fmt.Printf("⏱️  Duration: %s\n", duration)
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
 	
 	return nil
 }
@@ -118,8 +136,8 @@ func (e *Executor) executePhase(ctx context.Context, plan *ExecutionPlan, phase 
 		return fmt.Errorf("agent %s not found", phase.Agent)
 	}
 	
-	// Build query from tasks
-	query := e.buildPhaseQuery(phase)
+	// Build query from tasks with project context
+	query := e.buildPhaseQuery(plan, phase)
 	
 	// Execute with the agent
 	fmt.Printf("Executing tasks:\n")
@@ -141,7 +159,7 @@ func (e *Executor) executePhase(ctx context.Context, plan *ExecutionPlan, phase 
 	}
 	
 	// Process agent response - Scan for file blocks and write them
-	filesCreated, err := e.processFileBlocks(response.Answer)
+	filesCreated, err := e.processFileBlocks(response.Answer, plan, phase.Name)
 	if err != nil {
 		fmt.Printf("⚠️ Warning: Failed to write some files: %v\n", err)
 	}
@@ -178,46 +196,69 @@ func (e *Executor) executePhase(ctx context.Context, plan *ExecutionPlan, phase 
 }
 
 // processFileBlocks identifies code blocks with potential filenames and writes them to disk
-func (e *Executor) processFileBlocks(response string) ([]string, error) {
+func (e *Executor) processFileBlocks(response string, plan *ExecutionPlan, phaseName string) ([]string, error) {
 	var filesCreated []string
 	
-	// Regex matches: ```language filename
-	// followed by content
-	// followed by ```
-	// Example: ```python app.py
-	re := regexp.MustCompile("(?m)^```\\w+\\s+([\\w./-]+)\\s*\\n([\\s\\S]*?)^```")
-	matches := re.FindAllStringSubmatch(response, -1)
+	// Multiple regex patterns to match different code block formats:
+	// Pattern 1: ```language path/to/file.ext  (standard format)
+	// Pattern 2: ```language filename="path/to/file.ext"  (quoted format)
+	patterns := []string{
+		"(?s)```(\\w+)\\s+([\\w./-]+)\\s*\n(.*?)```",           // ```python path/file.py\ncode\n```
+		"(?s)```(\\w+)\\s*\n#\\s*([\\w./-]+)\\s*\n(.*?)```",    // ```python\n# path/file.py\ncode\n```
+	}
 	
-	for _, match := range matches {
-		if len(match) < 3 {
-			continue
-		}
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindAllStringSubmatch(response, -1)
 		
-		filename := strings.TrimSpace(match[1])
-		content := match[2]
-		
-		// Ensure file is in current directory or relative subdirectory
-		// Prevent writing outside project (e.g. /etc/passwd)
-		cleanPath := filepath.Clean(filename)
-		if strings.HasPrefix(cleanPath, "..") || strings.HasPrefix(cleanPath, "/") {
-			fmt.Printf("⚠️  Skipping unsafe file path: %s\n", filename)
-			continue
-		}
-		
-		// Create directory if needed
-		dir := filepath.Dir(cleanPath)
-		if dir != "." {
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				return filesCreated, fmt.Errorf("failed to create directory for %s: %w", filename, err)
+		for _, match := range matches {
+			if len(match) < 4 {
+				continue
 			}
+			
+			// lang := match[1]  // language (python, go, etc)
+			filename := strings.TrimSpace(match[2])
+			content := strings.TrimSpace(match[3])
+			
+			// Skip if no content
+			if content == "" {
+				fmt.Printf("⚠️  Skipping empty file: %s\n", filename)
+				continue
+			}
+			
+			// Ensure file is in current directory or relative subdirectory
+			cleanPath := filepath.Clean(filename)
+			if strings.HasPrefix(cleanPath, "..") || strings.HasPrefix(cleanPath, "/") {
+				fmt.Printf("⚠️  Skipping unsafe file path: %s\n", filename)
+				continue
+			}
+			
+			// Check if file was already created in a previous phase
+			if plan.Manifest != nil && plan.Manifest.FileExists(cleanPath) {
+				fmt.Printf("⚠️  Skipping already created file: %s\n", cleanPath)
+				continue
+			}
+			
+			// Create directory if needed
+			dir := filepath.Dir(cleanPath)
+			if dir != "." && dir != "" {
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					return filesCreated, fmt.Errorf("failed to create directory for %s: %w", filename, err)
+				}
+			}
+			
+			// Write file
+			if err := os.WriteFile(cleanPath, []byte(content), 0644); err != nil {
+				return filesCreated, fmt.Errorf("failed to write %s: %w", filename, err)
+			}
+			
+			// Track file in manifest
+			if plan.Manifest != nil {
+				plan.Manifest.AddFile(cleanPath, phaseName, "")
+			}
+			
+			filesCreated = append(filesCreated, cleanPath)
 		}
-		
-		// Write file
-		if err := os.WriteFile(cleanPath, []byte(content), 0644); err != nil {
-			return filesCreated, fmt.Errorf("failed to write %s: %w", filename, err)
-		}
-		
-		filesCreated = append(filesCreated, cleanPath)
 	}
 	
 	return filesCreated, nil
@@ -287,25 +328,76 @@ func isDangerousCommand(cmd string) bool {
 	return false
 }
 
-// buildPhaseQuery creates a comprehensive query for the phase
-func (e *Executor) buildPhaseQuery(phase *Phase) string {
-	query := fmt.Sprintf("Phase: %s\n\n", phase.Name)
-	query += "Please complete the following tasks:\n\n"
+// buildPhaseQuery creates a comprehensive query for the phase with project context
+func (e *Executor) buildPhaseQuery(plan *ExecutionPlan, phase *Phase) string {
+	var query strings.Builder
 	
-	for i, task := range phase.Tasks {
-		query += fmt.Sprintf("%d. %s\n", i+1, task.Description)
+	query.WriteString(fmt.Sprintf("Phase: %s\n\n", phase.Name))
+	
+	// Add file structure context from manifest
+	if plan.Manifest != nil {
+		structureCtx := plan.Manifest.GetFileStructureForContext()
+		if structureCtx != "" {
+			query.WriteString(structureCtx)
+			query.WriteString("\n")
+		}
+		
+		filesCtx := plan.Manifest.GetCreatedFilesForContext()
+		if filesCtx != "" {
+			query.WriteString(filesCtx)
+			query.WriteString("\n")
+		}
 	}
 	
-	query += fmt.Sprintf("\n\nSuccess Criteria: %s\n", phase.SuccessCriteria)
+	query.WriteString("Please complete the following tasks:\n\n")
 	
-	query += "\nIMPORTANT INSTRUCTIONS:\n"
-	query += "1. To CREATE FILES, allow output code in a block with the filename:\n"
-	query += "   ```python app.py\n   print('hello')\n   ```\n"
-	query += "2. To RUN COMMANDS, verify output use a bash block:\n"
-	query += "   ```bash\n   pip install flask\n   python tests.py\n   ```\n"
-	query += "3. The system will automatically execute these file creations and commands.\n"
+	for i, task := range phase.Tasks {
+		query.WriteString(fmt.Sprintf("%d. %s\n", i+1, task.Description))
+	}
 	
-	return query
+	query.WriteString(fmt.Sprintf("\n\nSuccess Criteria: %s\n", phase.SuccessCriteria))
+	
+	query.WriteString(`
+
+FILE OUTPUT FORMAT - You MUST use this EXACT format to create files:
+` + "```python ecommerce_api/routes/products.py" + `
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.get("/products")
+def list_products():
+    return {"products": []}
+` + "```" + `
+
+RULES:
+1. Every code block MUST have the file path on the SAME LINE as the language
+2. Include ACTUAL CODE in the block, not placeholders
+3. Use FULL relative paths like: ecommerce_api/models/product.py
+4. One file per code block
+`)
+	
+	return query.String()
+}
+
+// initProjectStructure creates project directories upfront
+func (e *Executor) initProjectStructure(plan *ExecutionPlan) error {
+	if plan.FileStructure == nil || len(plan.FileStructure) == 0 {
+		return nil
+	}
+	
+	fmt.Println("📂 Creating project structure...")
+	for dir := range plan.FileStructure {
+		if dir == "." || dir == "" {
+			continue
+		}
+		// Remove trailing slash if present
+		cleanDir := strings.TrimSuffix(dir, "/")
+		if err := os.MkdirAll(cleanDir, 0755); err != nil {
+			return fmt.Errorf("failed to create %s: %w", cleanDir, err)
+		}
+		fmt.Printf("  ✓ %s/\n", cleanDir)
+	}
+	return nil
 }
 
 // areDependenciesMet checks if all dependencies for a phase are satisfied

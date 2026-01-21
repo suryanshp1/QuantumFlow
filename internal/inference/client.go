@@ -26,10 +26,10 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		OllamaURL:   "http://localhost:11434",
-		Model:       "qwen2.5-coder:7b",  // Using 3B model - qwen2.5-coder:7b has issues
+		Model:       "qwen2.5-coder:7b",
 		ContextSize: 32768,
 		Temperature: 0.7,
-		Timeout:     5 * time.Minute,
+		Timeout:     15 * time.Minute, // Increased for slow local models
 	}
 }
 

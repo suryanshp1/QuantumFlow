@@ -22,24 +22,29 @@ func NewPlanner(client *inference.Client) *Planner {
 	}
 }
 
-// Generate creates an execution plan for a complex query
+// Generate creates an execution plan using two-stage hierarchical planning
+// Stage 1: Generate file structure (minimal tokens)
+// Stage 2: Generate phases (compact prompt)
 func (p *Planner) Generate(ctx context.Context, req *PlanGenerationRequest) (*ExecutionPlan, error) {
-	prompt := p.buildPlanningPrompt(req)
-	
-	// Generate plan using LLM
-	result, err := p.client.GenerateSync(ctx, prompt)
+	// Stage 1: Generate file structure first (small, focused prompt ~2k tokens)
+	fmt.Println("📐 Stage 1: Generating file structure...")
+	fileStructure, err := p.generateFileStructure(ctx, req.Query)
 	if err != nil {
-		return nil, fmt.Errorf("plan generation failed: %w", err)
+		// Fall back to empty structure if stage 1 fails
+		fmt.Printf("⚠️ File structure generation failed, continuing without: %v\n", err)
+		fileStructure = make(map[string][]string)
 	}
-
-	// Parse LLM response into structured plan
-	plan, err := p.parsePlanResponse(result.Response, req.Query)
+	
+	// Stage 2: Generate phases with compact prompt (~3k tokens)
+	fmt.Println("📋 Stage 2: Generating execution phases...")
+	plan, err := p.generatePhasesCompact(ctx, req.Query, fileStructure)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse plan: %w", err)
+		return nil, fmt.Errorf("phase generation failed: %w", err)
 	}
 
 	// Set metadata
 	plan.ID = generatePlanID()
+	plan.FileStructure = fileStructure
 	plan.CreatedAt = time.Now()
 	plan.UpdatedAt = time.Now()
 	plan.State = ExecutionState{
@@ -49,60 +54,92 @@ func (p *Planner) Generate(ctx context.Context, req *PlanGenerationRequest) (*Ex
 	return plan, nil
 }
 
-// buildPlanningPrompt creates the LLM prompt for plan generation
-func (p *Planner) buildPlanningPrompt(req *PlanGenerationRequest) string {
-	contextInfo := ""
-	if req.Context != nil {
-		contextInfo = fmt.Sprintf(`
-Project Context:
-- Current Directory: %s
-- Recent Activity: Working on a coding project
-`, req.Context.CurrentDir)
+// generateFileStructure creates a minimal prompt to get just the file structure
+// This is Stage 1 of hierarchical planning (~2k tokens)
+func (p *Planner) generateFileStructure(ctx context.Context, query string) (map[string][]string, error) {
+	prompt := fmt.Sprintf(`Generate ONLY a file structure for this project:
+"%s"
+
+Step 1: Choose a short snake_case project name (e.g. ecommerce_api, chat_bot).
+Step 2: ALL files must be inside a single root directory with that name.
+
+Output ONLY valid JSON in this exact format:
+{"dirs":{"{{project_name}}/":["main.py","README.md"],"{{project_name}}/src/":["api.py"]}}
+
+JSON:`, query)
+
+	result, err := p.client.GenerateSync(ctx, prompt)
+	if err != nil {
+		return nil, err
 	}
 
-	return fmt.Sprintf(`You are a senior software architect planning a complex software development task.
+	// Parse response
+	response := strings.TrimSpace(result.Response)
+	start := strings.Index(response, "{")
+	end := strings.LastIndex(response, "}")
+	if start == -1 || end == -1 {
+		return nil, fmt.Errorf("no JSON in response")
+	}
 
-User Request: %s
-%s
-Task: Generate a detailed, phased implementation plan.
+	var parsed struct {
+		Dirs map[string][]string `json:"dirs"`
+	}
+	if err := json.Unmarshal([]byte(response[start:end+1]), &parsed); err != nil {
+		return nil, err
+	}
 
-IMPORTANT RULES:
-1. Break down into 2-7 logical phases
-2. Each phase should be completable in 5-30 minutes
-3. Assign appropriate agent: code, data, infra, or sec
-4. Include specific, actionable tasks
-5. Define clear success criteria
-6. Estimate realistic time
-
-Respond with ONLY a JSON object in this EXACT format:
-{
-  "title": "Brief plan title",
-  "description": "One-sentence summary of what will be built",
-  "phases": [
-    {
-      "name": "Phase name",
-      "agent": "code|data|infra|sec",
-      "tasks": [
-        {"description": "Specific task 1"},
-        {"description": "Specific task 2"}
-      ],
-      "success_criteria": "How to verify this phase succeeded",
-      "estimated_time": "5-10 minutes",
-      "dependencies": []
-    }
-  ]
+	return parsed.Dirs, nil
 }
 
-Guidelines for phases:
-- Phase 1: Usually setup/design/schema
-- Middle phases: Core implementation
-- Final phase: Testing and verification
-- Use "code" agent for general programming tasks
-- Use "data" agent for database/SQL work
-- Use "infra" agent for deployment/Docker/K8s
-- Use "sec" agent for security audits
+// generatePhasesCompact creates phases using a minimal prompt
+// This is Stage 2 of hierarchical planning (~3k tokens)
+func (p *Planner) generatePhasesCompact(ctx context.Context, query string, fileStructure map[string][]string) (*ExecutionPlan, error) {
+	// Count files for context
+	fileCount := 0
+	for _, files := range fileStructure {
+		fileCount += len(files)
+	}
 
-JSON Response:`, req.Query, contextInfo)
+	// Get project root from structure to guide phase tasks
+	var projectRoot string
+	for dir := range fileStructure {
+		parts := strings.Split(dir, "/")
+		if len(parts) > 0 && parts[0] != "" {
+			if projectRoot == "" {
+				projectRoot = parts[0]
+			} else if projectRoot != parts[0] {
+				// Detect multiple roots, but stick to first one found for prompt hint
+			}
+		}
+	}
+
+	prompt := fmt.Sprintf(`Create build plan for: %s
+
+Context:
+- Project Root: %s/
+- Total Files: %d
+- Agents: code, data, infra, sec
+
+Rules:
+1. Phases: 3-5 max
+2. Tasks MUST use full file paths starting with %s/
+3. Output JSON only
+
+JSON:`, query, projectRoot, fileCount, projectRoot)
+
+	result, err := p.client.GenerateSync(ctx, prompt)
+	if err != nil {
+		return nil, err
+	}
+
+	return p.parsePlanResponse(result.Response, query)
+}
+
+// buildPlanningPrompt creates a combined prompt (fallback for larger models)
+func (p *Planner) buildPlanningPrompt(req *PlanGenerationRequest) string {
+	return fmt.Sprintf(`Plan for: %s
+Output JSON: {"title":"...","description":"...","phases":[{"name":"...","agent":"code","tasks":[{"description":"..."}],"success_criteria":"...","estimated_time":"5 min"}]}
+JSON:`, req.Query)
 }
 
 // parsePlanResponse extracts the execution plan from LLM output
@@ -132,9 +169,10 @@ func (p *Planner) parsePlanResponse(response string, query string) (*ExecutionPl
 	
 	// Parse into temporary structure
 	var rawPlan struct {
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		Phases      []struct {
+		Title         string              `json:"title"`
+		Description   string              `json:"description"`
+		FileStructure map[string][]string `json:"file_structure"`
+		Phases        []struct {
 			Name            string   `json:"name"`
 			Agent           string   `json:"agent"`
 			Tasks           []struct {
@@ -152,9 +190,10 @@ func (p *Planner) parsePlanResponse(response string, query string) (*ExecutionPl
 
 	// Convert to ExecutionPlan
 	plan := &ExecutionPlan{
-		Title:       rawPlan.Title,
-		Description: rawPlan.Description,
-		Phases:      make([]Phase, len(rawPlan.Phases)),
+		Title:         rawPlan.Title,
+		Description:   rawPlan.Description,
+		FileStructure: rawPlan.FileStructure,
+		Phases:        make([]Phase, len(rawPlan.Phases)),
 	}
 
 	// Convert phases
